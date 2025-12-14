@@ -1,31 +1,35 @@
 using MySqlConnector;
 using FDWotlkWebApi.Models;
-using System.Security.Cryptography;
-using System.Text;
+using Microsoft.Extensions.Options;
 
 namespace FDWotlkWebApi.Services
 {
+    public class MySqlOptions
+    {
+        public string Mangos { get; set; } = string.Empty;
+    }
+
     public class MySqlService : IMySqlService
     {
         private readonly string _connectionString;
         private readonly ILogger<MySqlService> _logger;
-        private readonly IAccountProvisioner _accountProvisioner;
 
-        public MySqlService(IConfiguration configuration, ILogger<MySqlService> logger, IAccountProvisioner accountProvisioner)
+        public MySqlService(IOptions<MySqlOptions> options, ILogger<MySqlService> logger)
         {
-            var cs = configuration.GetConnectionString("Mangos");
-            if (string.IsNullOrWhiteSpace(cs))
+            if (options.Value == null || string.IsNullOrEmpty(options.Value.Mangos))
+            {
                 throw new ArgumentException("Connection string 'Mangos' not configured.");
+            }
+
+            _connectionString = options.Value.Mangos;
 
             // Ensure connector options to handle MySQL 'zero' timestamps or conversion behavior.
-            if (!cs.Contains("AllowZeroDateTime", StringComparison.OrdinalIgnoreCase))
-                cs += ";AllowZeroDateTime=True";
-            if (!cs.Contains("ConvertZeroDateTime", StringComparison.OrdinalIgnoreCase))
-                cs += ";ConvertZeroDateTime=True";
+            if (!_connectionString.Contains("AllowZeroDateTime", StringComparison.OrdinalIgnoreCase))
+                _connectionString += ";AllowZeroDateTime=True";
+            if (!_connectionString.Contains("ConvertZeroDateTime", StringComparison.OrdinalIgnoreCase))
+                _connectionString += ";ConvertZeroDateTime=True";
 
-            _connectionString = cs;
             _logger = logger;
-            _accountProvisioner = accountProvisioner;
         }
         
         // Get list of players
@@ -80,27 +84,47 @@ namespace FDWotlkWebApi.Services
             }
         }
 
-        // Create an account with username and password only using SOAP
-        public async Task<(bool Success, string? ErrorMessage, long? InsertedId)> CreatePlayerAsync(CreatePlayerRequest request, CancellationToken cancellationToken = default)
+        // Update account expansion
+        public async Task UpdateAccountExpansionAsync(string username, int expansion, CancellationToken cancellationToken = default)
         {
+            const string sql = @"UPDATE account SET expansion = @expansion WHERE username = @username;";
+
             try
             {
-                var (success, errorMessage, externalId) = await _accountProvisioner.ProvisionAccountAsync(request.Username, request.Password, cancellationToken);
-                if (!success)
-                {
-                    _logger.LogError("Failed to provision account via SOAP: {ErrorMessage}", errorMessage);
-                    return (false, errorMessage, null);
-                }
+                await using var conn = new MySqlConnection(_connectionString);
+                await conn.OpenAsync(cancellationToken);
 
-                _logger.LogInformation("Account provisioned successfully via SOAP for username={Username}", request.Username);
-                return (true, null, externalId);
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandText = sql;
+                cmd.Parameters.AddWithValue("@expansion", expansion);
+                cmd.Parameters.AddWithValue("@username", username);
+
+                var rowsAffected = await cmd.ExecuteNonQueryAsync(cancellationToken);
+                if (rowsAffected > 0)
+                {
+                    _logger.LogInformation("Updated expansion for user {Username} to {Expansion}", username, expansion);
+                }
+                else
+                {
+                    _logger.LogWarning("No rows updated for user {Username}", username);
+                }
+            }
+            catch (MySqlException mex)
+            {
+                _logger.LogError(mex, "MySql error while updating account expansion for user {Username}", username);
+                throw;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Unexpected error while provisioning account via SOAP for username={Username}", request.Username);
-                return (false, ex.Message, null);
+                _logger.LogError(ex, "Unexpected error while updating account expansion for user {Username}", username);
+                throw;
             }
         }
+    }
+
+    public class DatabaseOptions
+    {
+        public string ConnectionString { get; set; } = string.Empty;
     }
 }
 

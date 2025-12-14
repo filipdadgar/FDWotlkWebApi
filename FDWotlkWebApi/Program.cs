@@ -14,6 +14,9 @@ builder.Services.Configure<SoapServerOptions>(builder.Configuration.GetSection("
 // Register HttpClient for SoapAccountProvisioner
 builder.Services.AddHttpClient<SoapAccountProvisioner>();
 
+// Add MySqlService configuration to use appsettings
+builder.Services.Configure<MySqlOptions>(builder.Configuration.GetSection("ConnectionStrings"));
+
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 

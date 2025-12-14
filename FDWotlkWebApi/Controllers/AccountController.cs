@@ -8,10 +8,14 @@ namespace FDWotlkWebApi.Controllers
     public class AccountController : ControllerBase
     {
         private readonly IAccountProvisioner _accountProvisioner;
+        private readonly ILogger<AccountController> _logger;
+        private readonly IMySqlService _mySqlService;
 
-        public AccountController(IAccountProvisioner accountProvisioner)
+        public AccountController(IAccountProvisioner accountProvisioner, IMySqlService mySqlService, ILogger<AccountController> logger)
         {
             _accountProvisioner = accountProvisioner;
+            _mySqlService = mySqlService;
+            _logger = logger;
         }
 
         [HttpPost("create")] // Endpoint: POST api/account/create
@@ -26,6 +30,8 @@ namespace FDWotlkWebApi.Controllers
 
             if (result.Success)
             {
+                // Call MySQL service to update account expansion
+                await _mySqlService.UpdateAccountExpansionAsync(request.Username, 2, cancellationToken);
                 return Ok(new { Message = "Account created successfully.", request.Username });
             }
 
