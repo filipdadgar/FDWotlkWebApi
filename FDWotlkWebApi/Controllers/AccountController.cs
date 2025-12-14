@@ -31,6 +31,20 @@ namespace FDWotlkWebApi.Controllers
 
             return StatusCode(500, new { Message = "Account creation failed.", Error = result.ErrorMessage });
         }
+
+        [HttpGet("server-info")] // Endpoint: GET api/account/server-info
+        public async Task<IActionResult> GetServerInfo()
+        {
+            try
+            {
+                var serverInfo = await _accountProvisioner.GetServerInfoAsync();
+                return Ok(new { Message = "Server info retrieved successfully.", Data = serverInfo });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { Message = "Failed to retrieve server info.", Error = ex.Message });
+            }
+        }
     }
 
     public class CreateAccountRequest
