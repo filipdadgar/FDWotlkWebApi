@@ -1,0 +1,6 @@
+@FDWotlkWebApi_HostAddress = http://localhost:5277
+
+GET {{FDWotlkWebApi_HostAddress}}/
+Accept: application/json
+
+###
