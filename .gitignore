@@ -1,0 +1,4 @@
+/FDWotlkWebApi/appsettings.json
+*.DS_Store*
+FDWotlkWebApi/bin/
+FDWotlkWebApi/obj/
