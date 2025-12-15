@@ -120,6 +120,69 @@ namespace FDWotlkWebApi.Services
                 throw;
             }
         }
+
+        // Count accounts created from a specific IP. Optionally limit to a recent time window.
+        public async Task<int> GetAccountCountByIpAsync(string ip, TimeSpan? window = null, CancellationToken cancellationToken = default)
+        {
+            var sql = "SELECT COUNT(*) FROM account WHERE last_ip = @ip";
+            if (window.HasValue)
+                sql += " AND joindate >= @since";
+
+            try
+            {
+                await using var conn = new MySqlConnection(_connectionString);
+                await conn.OpenAsync(cancellationToken);
+
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandText = sql;
+                cmd.Parameters.AddWithValue("@ip", ip);
+                if (window.HasValue)
+                    cmd.Parameters.AddWithValue("@since", DateTime.UtcNow - window.Value);
+
+                var result = await cmd.ExecuteScalarAsync(cancellationToken);
+                if (result == null || result == DBNull.Value) return 0;
+                return Convert.ToInt32(result);
+            }
+            catch (MySqlException mex)
+            {
+                _logger.LogError(mex, "MySql error while counting accounts for IP {Ip}", ip);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error while counting accounts for IP {Ip}", ip);
+                throw;
+            }
+        }
+
+        // Update last_ip for an account
+        public async Task UpdateAccountLastIpAsync(string username, string ip, CancellationToken cancellationToken = default)
+        {
+            const string sql = @"UPDATE account SET last_ip = @ip WHERE username = @username;";
+
+            try
+            {
+                await using var conn = new MySqlConnection(_connectionString);
+                await conn.OpenAsync(cancellationToken);
+
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandText = sql;
+                cmd.Parameters.AddWithValue("@ip", ip);
+                cmd.Parameters.AddWithValue("@username", username);
+
+                await cmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+            catch (MySqlException mex)
+            {
+                _logger.LogError(mex, "MySql error while updating last_ip for user {Username}", username);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error while updating last_ip for user {Username}", username);
+                throw;
+            }
+        }
     }
 
     public class DatabaseOptions
