@@ -51,6 +51,21 @@ namespace FDWotlkWebApi.Controllers
                 return StatusCode(500, new { Message = "Failed to retrieve server info.", Error = ex.Message });
             }
         }
+        
+        [HttpGet("players")] // Endpoint: GET api/account/players
+        public async Task<IActionResult> GetPlayers(CancellationToken cancellationToken)
+        {
+            try
+            {
+                var players = await _mySqlService.GetPlayersAsync(cancellationToken);
+                return Ok(players);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetPlayers failed");
+                return Problem(detail: "An error occurred while retrieving players.", statusCode: 500);
+            }
+        }
     }
 
     public class CreateAccountRequest
