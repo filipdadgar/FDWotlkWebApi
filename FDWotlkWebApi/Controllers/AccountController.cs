@@ -7,13 +7,13 @@ namespace FDWotlkWebApi.Controllers
     [Route("api/[controller]")]
     public class AccountController : ControllerBase
     {
-        private readonly IAccountProvisioner _accountProvisioner;
+        private readonly ISoapAccountProvisioner _soapAccountProvisioner;
         private readonly ILogger<AccountController> _logger;
         private readonly IMySqlService _mySqlService;
 
-        public AccountController(IAccountProvisioner accountProvisioner, IMySqlService mySqlService, ILogger<AccountController> logger)
+        public AccountController(ISoapAccountProvisioner soapAccountProvisioner, IMySqlService mySqlService, ILogger<AccountController> logger)
         {
-            _accountProvisioner = accountProvisioner;
+            _soapAccountProvisioner = soapAccountProvisioner;
             _mySqlService = mySqlService;
             _logger = logger;
         }
@@ -26,7 +26,7 @@ namespace FDWotlkWebApi.Controllers
                 return BadRequest("Username and password are required.");
             }
 
-            var result = await _accountProvisioner.ProvisionAccountAsync(request.Username, request.Password, cancellationToken);
+            var result = await _soapAccountProvisioner.ProvisionAccountAsync(request.Username, request.Password, cancellationToken);
 
             if (result.Success)
             {
@@ -43,7 +43,7 @@ namespace FDWotlkWebApi.Controllers
         {
             try
             {
-                var serverInfo = await _accountProvisioner.GetServerInfoAsync();
+                var serverInfo = await _soapAccountProvisioner.GetServerInfoAsync();
                 return Ok(new { Message = "Server info retrieved successfully.", Data = serverInfo });
             }
             catch (Exception ex)

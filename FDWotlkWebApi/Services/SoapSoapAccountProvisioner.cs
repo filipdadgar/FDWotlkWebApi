@@ -11,7 +11,7 @@ namespace FDWotlkWebApi.Services
         public string Password { get; set; } = string.Empty;
     }
 
-    public class SoapAccountProvisioner : IAccountProvisioner
+    public class SoapSoapAccountProvisioner : ISoapAccountProvisioner
     {
         private readonly string _host;
         private readonly int _port;
@@ -19,7 +19,7 @@ namespace FDWotlkWebApi.Services
         private readonly string _password;
         private HttpClient _httpClient;
 
-        public SoapAccountProvisioner(IOptions<SoapServerOptions> options, HttpClient httpClient)
+        public SoapSoapAccountProvisioner(IOptions<SoapServerOptions> options, HttpClient httpClient)
         {
             var soapOptions = options.Value;
             _host = soapOptions.Host;
@@ -59,10 +59,6 @@ namespace FDWotlkWebApi.Services
         {
             try
             {
-                Console.WriteLine("Creating account via SOAP...");
-                Console.WriteLine($"Username: {username}");
-                Console.WriteLine($"Password: {password}");
-
                 var command = $"account create {username} {password}";
                 var result = await SendSoapRequestAsync("executeCommand", command);
 
