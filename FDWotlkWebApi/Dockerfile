@@ -20,4 +20,11 @@ RUN dotnet publish "FDWotlkWebApi.csproj" -c $BUILD_CONFIGURATION -o /app/publis
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
+
+# Set environment variables to override appsettings.json
+ENV ConnectionStrings__MySql="your_mysql_connection_string_here"
+ENV SoapServer__Address="your_soap_server_address"
+ENV SoapServer__Username="your_soap_username"
+ENV SoapServer__Password="your_soap_password"
+
 ENTRYPOINT ["dotnet", "FDWotlkWebApi.dll"]
