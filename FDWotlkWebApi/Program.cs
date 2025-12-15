@@ -2,23 +2,26 @@ using FDWotlkWebApi.Services;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
-
+builder.Services.AddControllers();
 // Add services to the container.
 builder.Services.AddScoped<IAccountProvisioner, SoapAccountProvisioner>();
-builder.Services.AddControllers();
 // Register DB service
 builder.Services.AddScoped<IMySqlService, MySqlService>();
-
 // Register SOAP account provisioner
 builder.Services.Configure<SoapServerOptions>(builder.Configuration.GetSection("SoapServer"));
 // Register HttpClient for SoapAccountProvisioner
 builder.Services.AddHttpClient<SoapAccountProvisioner>();
-
 // Add MySqlService configuration to use appsettings
 builder.Services.Configure<MySqlOptions>(builder.Configuration.GetSection("ConnectionStrings"));
-
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
+
+// Add CORS services
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAll",
+        corsPolicyBuilder => corsPolicyBuilder.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
+});
 
 var app = builder.Build();
 
@@ -32,6 +35,7 @@ if (app.Environment.IsDevelopment())
     app.MapGet("/", () => Results.Redirect("/scalar"));
 }
 
+app.UseCors("AllowAll");
 app.UseHttpsRedirection();
 
 app.UseAuthorization();
