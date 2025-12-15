@@ -1,6 +1,7 @@
 using MySqlConnector;
 using FDWotlkWebApi.Models;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Configuration;
 
 namespace FDWotlkWebApi.Services
 {
@@ -14,22 +15,71 @@ namespace FDWotlkWebApi.Services
         private readonly string _connectionString;
         private readonly ILogger<MySqlService> _logger;
 
-        public MySqlService(IOptions<MySqlOptions> options, ILogger<MySqlService> logger)
+        public MySqlService(IOptions<MySqlOptions> options, ILogger<MySqlService> logger, IConfiguration configuration)
         {
-            if (options.Value == null || string.IsNullOrEmpty(options.Value.Mangos))
+            _logger = logger;
+
+            // Try options first
+            var configured = options?.Value?.Mangos;
+            string source = "none";
+
+            if (!string.IsNullOrEmpty(configured))
             {
+                source = "IOptions";
+            }
+            else
+            {
+                // Fallback to IConfiguration connection string or environment variable
+                configured = configuration.GetConnectionString("Mangos")
+                             ?? configuration["ConnectionStrings:Mangos"]
+                             ?? Environment.GetEnvironmentVariable("ConnectionStrings__Mangos");
+
+                if (!string.IsNullOrEmpty(configuration.GetConnectionString("Mangos"))) source = "Configuration.GetConnectionString";
+                else if (!string.IsNullOrEmpty(configuration["ConnectionStrings:Mangos"])) source = "Configuration[ConnectionStrings:Mangos]";
+                else if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ConnectionStrings__Mangos"))) source = "Environment.ConnectionStrings__Mangos";
+            }
+
+            if (string.IsNullOrEmpty(configured))
+            {
+                _logger.LogError("Connection string 'Mangos' not configured. Sources checked: IOptions, Configuration.GetConnectionString('Mangos'), Configuration['ConnectionStrings:Mangos'], Environment variable ConnectionStrings__Mangos");
                 throw new ArgumentException("Connection string 'Mangos' not configured.");
             }
 
-            _connectionString = options.Value.Mangos;
+            // Mask connection string when logging: keep protocol/host part if present but hide password
+            string masked = MaskConnectionString(configured);
+            _logger.LogInformation("Using MySQL connection string from {Source}: {ConnPreview}", source, masked);
+
+            _connectionString = configured;
 
             // Ensure connector options to handle MySQL 'zero' timestamps or conversion behavior.
             if (!_connectionString.Contains("AllowZeroDateTime", StringComparison.OrdinalIgnoreCase))
                 _connectionString += ";AllowZeroDateTime=True";
             if (!_connectionString.Contains("ConvertZeroDateTime", StringComparison.OrdinalIgnoreCase))
                 _connectionString += ";ConvertZeroDateTime=True";
+        }
 
-            _logger = logger;
+        private static string MaskConnectionString(string cs)
+        {
+            try
+            {
+                // Very simple masking: replace password=...; or Password=...; occurrences
+                var parts = cs.Split(';');
+                for (int i = 0; i < parts.Length; i++)
+                {
+                    var p = parts[i];
+                    if (p.IndexOf("password", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        var idx = p.IndexOf('=');
+                        if (idx >= 0)
+                            parts[i] = p.Substring(0, idx + 1) + "****";
+                    }
+                }
+                return string.Join(';', parts);
+            }
+            catch
+            {
+                return "[masked]";
+            }
         }
         
         // Get list of players

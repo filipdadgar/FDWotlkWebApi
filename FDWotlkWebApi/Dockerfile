@@ -21,10 +21,13 @@ FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
 
-# Set environment variables to override appsettings.json
-ENV ConnectionStrings__MySql="your_mysql_connection_string_here"
-ENV SoapServer__Address="your_soap_server_address"
-ENV SoapServer__Username="your_soap_username"
-ENV SoapServer__Password="your_soap_password"
+# Set environment variables to override appsettings.json and make Kestrel listen on container port 8080
+# Note: update the connection string and soap credentials with secure values when deploying
+ENV ASPNETCORE_URLS="http://+:8080"
+ENV ConnectionStrings__Mangos="Server=dbname;Port=3306;Database=wotlkrealmd;User Id=dbuser;Password=dbpassword;"
+ENV SoapServer__Host="servername"
+ENV SoapServer__Port="7878"
+ENV SoapServer__Username="USERNAME"
+ENV SoapServer__Password="PASSWORD"
 
 ENTRYPOINT ["dotnet", "FDWotlkWebApi.dll"]
