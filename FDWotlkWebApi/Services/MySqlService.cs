@@ -152,7 +152,7 @@ namespace FDWotlkWebApi.Services
                 selectParts.Add(existingCols.Contains("failed_logins") ? "failed_logins" : "0 AS failed_logins");
                 selectParts.Add(existingCols.Contains("locked") ? "locked" : "0 AS locked");
 
-                // last_login
+                // last_login: include if present, otherwise alias NULL so the result always contains last_login
                 selectParts.Add(existingCols.Contains("last_login") ? "last_login" : "NULL AS last_login");
 
                 // active_realm_id and expansion
@@ -178,6 +178,7 @@ namespace FDWotlkWebApi.Services
                         LastIp = reader.IsDBNull("last_ip") ? string.Empty : reader.GetString("last_ip"),
                         FailedLogins = reader.IsDBNull("failed_logins") ? 0 : reader.GetInt32("failed_logins"),
                         Locked = reader.GetByteSafe("locked") != 0,
+                        // last_login may or may not be present; if it was not selected it will be NULL and we default to MinValue
                         LastLogin = reader.IsDBNullOrdinalSafe("last_login") ? DateTime.MinValue : reader.GetDateTime("last_login"),
                         ActiveRealmId = reader.IsDBNull("active_realm_id") ? 0 : reader.GetInt32("active_realm_id"),
                         Expansion = reader.IsDBNull("expansion") ? 0 : reader.GetInt32("expansion")
