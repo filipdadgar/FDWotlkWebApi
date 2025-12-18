@@ -34,7 +34,7 @@ namespace FDWotlkWebApi.Services
                              ?? configuration["ConnectionStrings:Mangos"]
                              ?? Environment.GetEnvironmentVariable("ConnectionStrings__Mangos");
 
-                if (!string.IsNullOrEmpty(configuration.GetConnectionString("Mangos"))) source = "Configuration.GetConnectionString";
+                if (!string.IsNullOrEmpty(configuration.GetConnectionString("Mangos")) ) source = "Configuration.GetConnectionString";
                 else if (!string.IsNullOrEmpty(configuration["ConnectionStrings:Mangos"])) source = "Configuration[ConnectionStrings:Mangos]";
                 else if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ConnectionStrings__Mangos"))) source = "Environment.ConnectionStrings__Mangos";
             }
@@ -87,7 +87,8 @@ namespace FDWotlkWebApi.Services
         {
             var players = new List<Player>();
 
-            const string sql = @"SELECT id, username, gmlevel, email, joindate, last_ip, failed_logins, locked, last_login, active_realm_id, expansion FROM account LIMIT 100;";
+            // Use COALESCE to handle either `lockedIp` (new schema) or `last_ip` (older schema).
+            const string sql = @"SELECT id, username, gmlevel, email, joindate, COALESCE(lockedIp, last_ip) AS last_ip, failed_logins, locked, last_login, active_realm_id, expansion FROM account LIMIT 100;";
 
             try
             {
@@ -102,16 +103,16 @@ namespace FDWotlkWebApi.Services
                 {
                     var p = new Player
                     {
-                        Id = reader.GetInt32("id"),
-                        Username = reader.GetString("username"),
+                        Id = reader.IsDBNull("id") ? 0 : reader.GetInt32("id"),
+                        Username = reader.IsDBNull("username") ? string.Empty : reader.GetString("username"),
                         GmLevel = reader.GetByteSafe("gmlevel"),
                         Email = reader.IsDBNull("email") ? null : reader.GetString("email"),
                         JoinDate = reader.IsDBNull("joindate") ? DateTime.MinValue : reader.GetDateTime("joindate"),
                         LastIp = reader.IsDBNull("last_ip") ? string.Empty : reader.GetString("last_ip"),
                         FailedLogins = reader.IsDBNull("failed_logins") ? 0 : reader.GetInt32("failed_logins"),
-                        Locked = reader.IsDBNull("locked") ? false : (reader.GetInt32("locked") != 0),
-                        // last_login is a TIMESTAMP in the DB — map to DateTime
-                        LastLogin = reader.IsDBNull("last_login") ? DateTime.MinValue : reader.GetDateTime("last_login"),
+                        Locked = reader.GetByteSafe("locked") != 0,
+                        // last_login may be absent in some schema versions; use fallback handling in extension
+                        LastLogin = reader.IsDBNullOrdinalSafe("last_login") ? DateTime.MinValue : reader.GetDateTime("last_login"),
                         ActiveRealmId = reader.IsDBNull("active_realm_id") ? 0 : reader.GetInt32("active_realm_id"),
                         Expansion = reader.IsDBNull("expansion") ? 0 : reader.GetInt32("expansion")
                     };
@@ -255,6 +256,21 @@ static class MySqlDataReaderExtensions
     {
         var ord = reader.GetOrdinal(name);
         return reader.IsDBNull(ord);
+    }
+
+    // New helper: check by column name but return true if column missing or DBNull
+    public static bool IsDBNullOrdinalSafe(this MySqlDataReader reader, string name)
+    {
+        try
+        {
+            var ord = reader.GetOrdinal(name);
+            return reader.IsDBNull(ord);
+        }
+        catch (IndexOutOfRangeException)
+        {
+            // Column does not exist in this resultset
+            return true;
+        }
     }
 
     public static int GetInt32(this MySqlDataReader reader, string name)
