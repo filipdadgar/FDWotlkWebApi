@@ -87,13 +87,36 @@ namespace FDWotlkWebApi.Services
         {
             var players = new List<Player>();
 
-            // Use COALESCE to handle either `lockedIp` (new schema) or `last_ip` (older schema).
-            const string sql = @"SELECT id, username, gmlevel, email, joindate, COALESCE(lockedIp, last_ip) AS last_ip, failed_logins, locked, last_login, active_realm_id, expansion FROM account LIMIT 100;";
-
             try
             {
                 await using var conn = new MySqlConnection(_connectionString);
                 await conn.OpenAsync(cancellationToken);
+
+                // Determine which IP column exists to avoid referencing a non-existent column
+                var existingCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                const string colsSql = @"SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'account' AND COLUMN_NAME IN ('lockedIp','last_ip')";
+                await using (var colCmd = conn.CreateCommand())
+                {
+                    colCmd.CommandText = colsSql;
+                    await using var colReader = await colCmd.ExecuteReaderAsync(cancellationToken);
+                    while (await colReader.ReadAsync(cancellationToken))
+                    {
+                        var col = colReader.GetString(0);
+                        existingCols.Add(col);
+                    }
+                }
+
+                string lastIpExpr;
+                if (existingCols.Contains("lockedIp") && existingCols.Contains("last_ip"))
+                    lastIpExpr = "COALESCE(lockedIp, last_ip) AS last_ip";
+                else if (existingCols.Contains("lockedIp"))
+                    lastIpExpr = "lockedIp AS last_ip";
+                else if (existingCols.Contains("last_ip"))
+                    lastIpExpr = "last_ip AS last_ip";
+                else
+                    lastIpExpr = "'' AS last_ip";
+
+                var sql = $"SELECT id, username, gmlevel, email, joindate, {lastIpExpr}, failed_logins, locked, last_login, active_realm_id, expansion FROM account LIMIT 100;";
 
                 await using var cmd = conn.CreateCommand();
                 cmd.CommandText = sql;
