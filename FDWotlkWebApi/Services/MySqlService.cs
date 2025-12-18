@@ -81,6 +81,44 @@ namespace FDWotlkWebApi.Services
                 return "[masked]";
             }
         }
+
+        // Helper to resolve which IP column exists in the account table
+        private static async Task<string?> ResolveIpColumnAsync(MySqlConnection conn, CancellationToken cancellationToken)
+        {
+            var existing = await GetExistingAccountColumnsAsync(conn, cancellationToken);
+
+            if (existing.Contains("lockedIp") && existing.Contains("last_ip"))
+                return "COALESCE(lockedIp, last_ip)";
+            if (existing.Contains("lockedIp"))
+                return "lockedIp";
+            if (existing.Contains("last_ip"))
+                return "last_ip";
+            return null;
+        }
+
+        // Return a set of existing columns (limited to the ones we care about)
+        private static async Task<HashSet<string>> GetExistingAccountColumnsAsync(MySqlConnection conn, CancellationToken cancellationToken)
+        {
+            // Query information_schema for the specific columns we care about.
+            const string colsSql = @"SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'account' AND COLUMN_NAME IN ('lockedIp','last_ip','last_login','failed_logins','locked','active_realm_id','expansion','joindate')";
+            var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            await using var colCmd = conn.CreateCommand();
+            colCmd.CommandText = colsSql;
+            await using var colReader = await colCmd.ExecuteReaderAsync(cancellationToken);
+            while (await colReader.ReadAsync(cancellationToken))
+            {
+                try
+                {
+                    var field = colReader.GetString(0);
+                    existing.Add(field);
+                }
+                catch
+                {
+                    // ignore rows we can't read
+                }
+            }
+            return existing;
+        }
         
         // Get list of players
         public async Task<List<Player>> GetPlayersAsync(CancellationToken cancellationToken = default)
@@ -92,34 +130,12 @@ namespace FDWotlkWebApi.Services
                 await using var conn = new MySqlConnection(_connectionString);
                 await conn.OpenAsync(cancellationToken);
 
-                // Determine which IP column exists to avoid referencing a non-existent column
-                var existingCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                const string colsSql = @"SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'account' AND COLUMN_NAME IN ('lockedIp','last_ip')";
-                await using (var colCmd = conn.CreateCommand())
-                {
-                    colCmd.CommandText = colsSql;
-                    await using var colReader = await colCmd.ExecuteReaderAsync(cancellationToken);
-                    while (await colReader.ReadAsync(cancellationToken))
-                    {
-                        var col = colReader.GetString(0);
-                        existingCols.Add(col);
-                    }
-                }
-
-                string lastIpExpr;
-                if (existingCols.Contains("lockedIp") && existingCols.Contains("last_ip"))
-                    lastIpExpr = "COALESCE(lockedIp, last_ip) AS last_ip";
-                else if (existingCols.Contains("lockedIp"))
-                    lastIpExpr = "lockedIp AS last_ip";
-                else if (existingCols.Contains("last_ip"))
-                    lastIpExpr = "last_ip AS last_ip";
-                else
-                    lastIpExpr = "'' AS last_ip";
-
-                var sql = $"SELECT id, username, gmlevel, email, joindate, {lastIpExpr}, failed_logins, locked, last_login, active_realm_id, expansion FROM account LIMIT 100;";
-
+                // Use a safe projection that doesn't reference optional columns which might not exist across schema versions.
+                // This avoids 'Unknown column' errors on older/newer schemas. If you need richer fields (last_ip, last_login)
+                // we can attempt a second query or enable a compatibility mode.
+                var safeSql = "SELECT id, username, gmlevel, email, joindate, '' AS last_ip, failed_logins, locked, NULL AS last_login, active_realm_id, expansion FROM account LIMIT 100;";
                 await using var cmd = conn.CreateCommand();
-                cmd.CommandText = sql;
+                cmd.CommandText = safeSql;
 
                 await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
                 while (await reader.ReadAsync(cancellationToken))
@@ -131,11 +147,10 @@ namespace FDWotlkWebApi.Services
                         GmLevel = reader.GetByteSafe("gmlevel"),
                         Email = reader.IsDBNull("email") ? null : reader.GetString("email"),
                         JoinDate = reader.IsDBNull("joindate") ? DateTime.MinValue : reader.GetDateTime("joindate"),
-                        LastIp = reader.IsDBNull("last_ip") ? string.Empty : reader.GetString("last_ip"),
+                        LastIp = string.Empty, // safe projection returns empty string
                         FailedLogins = reader.IsDBNull("failed_logins") ? 0 : reader.GetInt32("failed_logins"),
                         Locked = reader.GetByteSafe("locked") != 0,
-                        // last_login may be absent in some schema versions; use fallback handling in extension
-                        LastLogin = reader.IsDBNullOrdinalSafe("last_login") ? DateTime.MinValue : reader.GetDateTime("last_login"),
+                        LastLogin = DateTime.MinValue, // safe projection returns NULL
                         ActiveRealmId = reader.IsDBNull("active_realm_id") ? 0 : reader.GetInt32("active_realm_id"),
                         Expansion = reader.IsDBNull("expansion") ? 0 : reader.GetInt32("expansion")
                     };
@@ -144,7 +159,7 @@ namespace FDWotlkWebApi.Services
                 }
 
                 _logger.LogInformation("Fetched {Count} players", players.Count);
-                return players;
+                 return players;
             }
             catch (MySqlException mex)
             {
@@ -198,14 +213,21 @@ namespace FDWotlkWebApi.Services
         // Count accounts created from a specific IP. Optionally limit to a recent time window.
         public async Task<int> GetAccountCountByIpAsync(string ip, TimeSpan? window = null, CancellationToken cancellationToken = default)
         {
-            var sql = "SELECT COUNT(*) FROM account WHERE last_ip = @ip";
-            if (window.HasValue)
-                sql += " AND joindate >= @since";
-
             try
             {
                 await using var conn = new MySqlConnection(_connectionString);
                 await conn.OpenAsync(cancellationToken);
+
+                var ipCol = await ResolveIpColumnAsync(conn, cancellationToken);
+                if (ipCol == null)
+                {
+                    _logger.LogWarning("No IP column found on account table; returning 0 for account count by IP");
+                    return 0;
+                }
+
+                var sql = $"SELECT COUNT(*) FROM account WHERE {ipCol} = @ip";
+                if (window.HasValue)
+                    sql += " AND joindate >= @since";
 
                 await using var cmd = conn.CreateCommand();
                 cmd.CommandText = sql;
@@ -232,12 +254,19 @@ namespace FDWotlkWebApi.Services
         // Update last_ip for an account
         public async Task UpdateAccountLastIpAsync(string username, string ip, CancellationToken cancellationToken = default)
         {
-            const string sql = @"UPDATE account SET last_ip = @ip WHERE username = @username;";
-
             try
             {
                 await using var conn = new MySqlConnection(_connectionString);
                 await conn.OpenAsync(cancellationToken);
+
+                var ipCol = await ResolveIpColumnAsync(conn, cancellationToken);
+                if (ipCol == null)
+                {
+                    _logger.LogWarning("No IP column found on account table; cannot update last_ip for user {Username}", username);
+                    return;
+                }
+
+                var sql = $"UPDATE account SET {ipCol} = @ip WHERE username = @username;";
 
                 await using var cmd = conn.CreateCommand();
                 cmd.CommandText = sql;
