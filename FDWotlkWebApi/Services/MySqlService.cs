@@ -96,26 +96,21 @@ namespace FDWotlkWebApi.Services
             return null;
         }
 
-        // Return a set of existing columns (limited to the ones we care about)
+        // Return a set of existing columns for the `account` table by performing a schema-only SELECT
+        // This avoids relying on information_schema and works even when that access is restricted.
         private static async Task<HashSet<string>> GetExistingAccountColumnsAsync(MySqlConnection conn, CancellationToken cancellationToken)
         {
-            // Query information_schema for the specific columns we care about.
-            const string colsSql = @"SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'account' AND COLUMN_NAME IN ('lockedIp','last_ip','last_login','failed_logins','locked','active_realm_id','expansion','joindate')";
             var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            await using var colCmd = conn.CreateCommand();
-            colCmd.CommandText = colsSql;
-            await using var colReader = await colCmd.ExecuteReaderAsync(cancellationToken);
-            while (await colReader.ReadAsync(cancellationToken))
+            // Perform a query that returns no rows but exposes column metadata
+            const string schemaSql = "SELECT * FROM account LIMIT 0";
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = schemaSql;
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            var cols = reader.GetColumnSchema();
+            foreach (var col in cols)
             {
-                try
-                {
-                    var field = colReader.GetString(0);
-                    existing.Add(field);
-                }
-                catch
-                {
-                    // ignore rows we can't read
-                }
+                if (!string.IsNullOrEmpty(col.ColumnName))
+                    existing.Add(col.ColumnName);
             }
             return existing;
         }
@@ -130,12 +125,45 @@ namespace FDWotlkWebApi.Services
                 await using var conn = new MySqlConnection(_connectionString);
                 await conn.OpenAsync(cancellationToken);
 
-                // Use a safe projection that doesn't reference optional columns which might not exist across schema versions.
-                // This avoids 'Unknown column' errors on older/newer schemas. If you need richer fields (last_ip, last_login)
-                // we can attempt a second query or enable a compatibility mode.
-                var safeSql = "SELECT id, username, gmlevel, email, joindate, '' AS last_ip, failed_logins, locked, NULL AS last_login, active_realm_id, expansion FROM account LIMIT 100;";
+                // Discover existing account columns
+                var existingCols = await GetExistingAccountColumnsAsync(conn, cancellationToken);
+
+                // Base required columns
+                var selectParts = new List<string>
+                {
+                    "id",
+                    "username",
+                    "gmlevel",
+                    "email",
+                    "joindate"
+                };
+
+                // last_ip: prefer lockedIp or last_ip; if neither present, alias empty string
+                if (existingCols.Contains("lockedIp") && existingCols.Contains("last_ip"))
+                    selectParts.Add("COALESCE(lockedIp, last_ip) AS last_ip");
+                else if (existingCols.Contains("lockedIp"))
+                    selectParts.Add("lockedIp AS last_ip");
+                else if (existingCols.Contains("last_ip"))
+                    selectParts.Add("last_ip AS last_ip");
+                else
+                    selectParts.Add("'' AS last_ip");
+
+                // failed_logins and locked
+                selectParts.Add(existingCols.Contains("failed_logins") ? "failed_logins" : "0 AS failed_logins");
+                selectParts.Add(existingCols.Contains("locked") ? "locked" : "0 AS locked");
+
+                // last_login
+                selectParts.Add(existingCols.Contains("last_login") ? "last_login" : "NULL AS last_login");
+
+                // active_realm_id and expansion
+                selectParts.Add(existingCols.Contains("active_realm_id") ? "active_realm_id" : "0 AS active_realm_id");
+                selectParts.Add(existingCols.Contains("expansion") ? "expansion" : "0 AS expansion");
+
+                var proj = string.Join(", ", selectParts);
+                var sql = $"SELECT {proj} FROM account LIMIT 100;";
+
                 await using var cmd = conn.CreateCommand();
-                cmd.CommandText = safeSql;
+                cmd.CommandText = sql;
 
                 await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
                 while (await reader.ReadAsync(cancellationToken))
@@ -147,10 +175,10 @@ namespace FDWotlkWebApi.Services
                         GmLevel = reader.GetByteSafe("gmlevel"),
                         Email = reader.IsDBNull("email") ? null : reader.GetString("email"),
                         JoinDate = reader.IsDBNull("joindate") ? DateTime.MinValue : reader.GetDateTime("joindate"),
-                        LastIp = string.Empty, // safe projection returns empty string
+                        LastIp = reader.IsDBNull("last_ip") ? string.Empty : reader.GetString("last_ip"),
                         FailedLogins = reader.IsDBNull("failed_logins") ? 0 : reader.GetInt32("failed_logins"),
                         Locked = reader.GetByteSafe("locked") != 0,
-                        LastLogin = DateTime.MinValue, // safe projection returns NULL
+                        LastLogin = reader.IsDBNullOrdinalSafe("last_login") ? DateTime.MinValue : reader.GetDateTime("last_login"),
                         ActiveRealmId = reader.IsDBNull("active_realm_id") ? 0 : reader.GetInt32("active_realm_id"),
                         Expansion = reader.IsDBNull("expansion") ? 0 : reader.GetInt32("expansion")
                     };
