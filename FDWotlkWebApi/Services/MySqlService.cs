@@ -315,6 +315,42 @@ namespace FDWotlkWebApi.Services
                 throw;
             }
         }
+
+        // New method: Delete an account by username
+        public async Task DeleteAccountAsync(string username, CancellationToken cancellationToken = default)
+        {
+            const string sql = @"DELETE FROM account WHERE username = @username;";
+
+            try
+            {
+                await using var conn = new MySqlConnection(_connectionString);
+                await conn.OpenAsync(cancellationToken);
+
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandText = sql;
+                cmd.Parameters.AddWithValue("@username", username);
+
+                var rowsAffected = await cmd.ExecuteNonQueryAsync(cancellationToken);
+                if (rowsAffected > 0)
+                {
+                    _logger.LogInformation("Deleted account {Username} (rows affected: {Rows})", username, rowsAffected);
+                }
+                else
+                {
+                    _logger.LogWarning("Delete account: no rows affected for username {Username}", username);
+                }
+            }
+            catch (MySqlException mex)
+            {
+                _logger.LogError(mex, "MySql error while deleting account {Username}", username);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error while deleting account {Username}", username);
+                throw;
+            }
+        }
     }
 
     public class DatabaseOptions

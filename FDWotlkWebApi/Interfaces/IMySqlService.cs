@@ -8,5 +8,6 @@ namespace FDWotlkWebApi.Services
         Task UpdateAccountExpansionAsync(string username, int expansion, CancellationToken cancellationToken = default);
         Task<int> GetAccountCountByIpAsync(string ip, TimeSpan? window = null, CancellationToken cancellationToken = default);
         Task UpdateAccountLastIpAsync(string username, string ip, CancellationToken cancellationToken = default);
+        Task DeleteAccountAsync(string username, CancellationToken cancellationToken = default);
     }
 }

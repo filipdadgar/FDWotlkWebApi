@@ -105,6 +105,27 @@ namespace FDWotlkWebApi.Controllers
             }
         }
 
+        [HttpDelete("{username}")]
+        public async Task<IActionResult> DeleteAccount(string username, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(username))
+            {
+                return BadRequest(new { Message = "Username is required." });
+            }
+
+            try
+            {
+                _logger.LogInformation("Delete account requested for username {Username}", username);
+                await _mySqlService.DeleteAccountAsync(username, cancellationToken);
+                return Ok(new { Message = "Account deletion attempted.", Username = username });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to delete account {Username}", username);
+                return StatusCode(500, new { Message = "Failed to delete account.", Error = ex.Message });
+            }
+        }
+
         private string GetClientIp()
         {
             // Prefer X-Forwarded-For (may contain comma-separated list)
@@ -118,11 +139,11 @@ namespace FDWotlkWebApi.Controllers
             var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
             return string.IsNullOrEmpty(ip) ? "0.0.0.0" : ip!;
         }
-    }
-
-    public class CreateAccountRequest
-    {
-        public string Username { get; set; } = string.Empty;
-        public string Password { get; set; } = string.Empty;
+    
+        public class CreateAccountRequest
+        {
+            public string Username { get; set; } = string.Empty;
+            public string Password { get; set; } = string.Empty;
+        }
     }
 }
